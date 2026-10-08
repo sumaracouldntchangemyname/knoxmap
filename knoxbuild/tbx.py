@@ -42,7 +42,7 @@ def _attrs(pairs: list[tuple[str, object]]) -> str:
 
 # A pitched roof needs room for two slopes; a narrower strip of a house (a
 # porch, one step of a turned footprint) keeps a flat roof.
-PEAK_MIN_TILES = 4
+PEAK_MIN_TILES = 3
 # The 30-degree roofs the game's own houses wear, which BuildingEd sizes to an
 # odd number of tiles across, 3 to 11; a house up to two tiles wider takes an
 # 11 and a flat strip. Wider than that, the steep 45-degree gable with a flat

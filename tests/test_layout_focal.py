@@ -16,6 +16,34 @@ def center_furniture(room_kind, building_kind):
 
 
 class FocalRooms(unittest.TestCase):
+    def test_lounge_seating_faces_the_tv(self):
+        for room_kind, building_kind in (("livingroom", "house"),
+                                         ("motelroom", "apartment")):
+            with self.subTest(room_kind=room_kind):
+                room = layout.Room(0, 0, 15, 15, kind=room_kind)
+                plan = layout.Plan(16, 16, rooms=[room],
+                                   grid=[[1] * 16 for _ in range(16)],
+                                   kind=building_kind)
+                layout._furnish(plan, random.Random(3))
+                tv_x, tv_y = next((x, y) for role, x, y, _facing in plan.furniture
+                                  if role == "tv")
+                armchairs = [(x, y) for role, x, y, _facing in plan.furniture
+                             if role == "armchair"]
+                if room_kind == "livingroom":
+                    self.assertTrue(any(x == tv_x and y < tv_y for x, y in armchairs))
+                else:
+                    self.assertTrue(any(x == tv_x and y > tv_y for x, y in armchairs))
+                for role, x, y, facing in plan.furniture:
+                    if role not in {"sofa", "armchair"}:
+                        continue
+                    cells = layout._cells_for(role, x, y, facing)
+                    seat_x = sum(cx for cx, _cy in cells) / len(cells)
+                    seat_y = sum(cy for _cx, cy in cells) / len(cells)
+                    front = {"N": (0, 1), "S": (0, -1),
+                             "W": (1, 0), "E": (-1, 0)}[facing]
+                    self.assertGreater((tv_x - seat_x) * front[0]
+                                       + (tv_y - seat_y) * front[1], 0)
+
     def test_motel_room_centres_bed_and_tv(self):
         roles = center_furniture("motelroom", "apartment")
         self.assertIn("double_bed", roles)
@@ -27,9 +55,31 @@ class FocalRooms(unittest.TestCase):
         self.assertGreaterEqual(roles.count("chair"), 5)
 
     def test_civic_lobby_centres_reception_counter(self):
-        roles = center_furniture("lobby", "police")
-        self.assertEqual(roles.count("shop_counter"), 1)
-        self.assertEqual(roles.count("chair"), 3)
+        for building_kind in layout.CIVIC_KINDS | {"apartment"}:
+            with self.subTest(building_kind=building_kind):
+                roles = center_furniture("lobby", building_kind)
+                self.assertEqual(roles.count("shop_counter"), 1)
+                self.assertEqual(roles.count("chair"), 3)
+
+    def test_bedrooms_center_bed_and_wardrobe(self):
+        roles = center_furniture("bedroom", "house")
+        self.assertIn("double_bed", roles)
+        self.assertIn("wardrobe", roles)
+
+    def test_medical_rooms_center_beds_and_seating(self):
+        for room_kind in ("medical", "clinic", "medicaloffice", "dentist"):
+            with self.subTest(room_kind=room_kind):
+                roles = center_furniture(room_kind, "medical")
+                self.assertIn("bed", roles)
+                self.assertIn("sidetable", roles)
+                self.assertIn("chair", roles)
+
+    def test_warehouse_and_workshop_center_storage_groups(self):
+        for room_kind in ("warehouse", "workshop"):
+            with self.subTest(room_kind=room_kind):
+                roles = center_furniture(room_kind, "industrial")
+                self.assertIn("metal_rack", roles)
+                self.assertIn("crate", roles)
 
     def test_hotel_reception_is_on_ground_floor(self):
         ground = layout.build_plan(32, 24, seed=19, kind="apartment", hotel=True)

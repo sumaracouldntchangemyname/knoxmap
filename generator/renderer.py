@@ -424,6 +424,8 @@ LANDSCAPE_ORDER = [
     "cemetery",
     "orchard",
     "farmland",       # light grass
+    "farmyard",
+    "aerodrome",
     "grass",          # medium grass
     "park",           # medium grass w/ trees added by vegetation pass
     "sports",
@@ -447,6 +449,10 @@ LANDSCAPE_ORDER = [
     "road_minor",
     "road_medium",
     "road_major",     # widest, so it wins at junctions
+    "runway",
+    "taxiway",
+    "apron",
+    "helipad",
     # Building footprints are not painted at all. They used to be dirt, which
     # showed as a brown fringe wherever the placed building and the painted
     # footprint disagreed by a tile - and the building's own floor covers the
@@ -476,6 +482,10 @@ ROAD_WIDTHS_M = {
     "paved_path": 2.5,
     "pier": 3.0,
     "railway": 4.0,
+    "runway": 45.0,
+    "taxiway": 15.0,
+    "apron": 20.0,
+    "helipad": 18.0,
 }
 ROAD_WIDTHS_BY_HIERARCHY_M = {
     "motorway": 24.0, "trunk": 16.0, "primary": 12.0,
@@ -530,6 +540,7 @@ LANDSCAPE_FILL = {
     "grass": C.MEDIUM_GRASS,
     "park": C.MEDIUM_GRASS,
     "farmland": C.LIGHT_GRASS,
+    "farmyard": C.DIRT,
     # street/street2/street4 in Rules.txt. road_minor used to paint
     # lightgravel, which put a gravel track through the middle of every
     # residential street in town.
@@ -557,6 +568,11 @@ LANDSCAPE_FILL = {
     "playground": C.SAND,
     "track": C.CLAY,
     "pool": C.WATER,
+    "aerodrome": C.MEDIUM_GRASS,
+    "runway": C.LIGHT_ASPHALT,
+    "taxiway": C.DARK_ASPHALT,
+    "apron": C.MEDIUM_ASPHALT,
+    "helipad": C.PALE_CONCRETE,
 }
 
 # Categories knoxbuild needs as areas, to tell what a building standing in
@@ -564,7 +580,8 @@ LANDSCAPE_FILL = {
 # not a house.
 AREA_CATEGORIES = {"residential", "commercial", "industrial", "military",
                    "schoolyard", "hospital_grounds", "worship_grounds",
-                   "cemetery", "parking", "sports", "park", "playground"}
+                   "cemetery", "parking", "sports", "park", "playground",
+                   "farmyard"}
 # Drawn onto the vegetation bitmap rather than the ground.
 VEG_CATEGORIES = {"forest", "scrub", "tree_single", "hedge", "orchard",
                   "cemetery", "wetland"}

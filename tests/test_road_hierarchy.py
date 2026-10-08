@@ -7,6 +7,7 @@ from PIL import Image
 
 from generator import osm, renderer, structures
 from knoxbuild import build as building
+from knoxbuild import areas
 from knoxbuild.context import Context
 
 
@@ -33,6 +34,29 @@ class RoadHierarchyTests(unittest.TestCase):
         self.assertEqual(osm.classify({"highway": "motorway"}), "road_major")
         self.assertEqual(osm.classify({"highway": "residential"}), "road_minor")
         self.assertEqual(osm.classify({"highway": "footway"}), "paved_path")
+
+    def test_airport_surfaces_have_categories_and_line_widths(self):
+        for aeroway in ("runway", "taxiway", "apron", "helipad"):
+            with self.subTest(aeroway=aeroway):
+                self.assertEqual(osm.classify({"aeroway": aeroway}), aeroway)
+                self.assertIn(aeroway, renderer.LANDSCAPE_FILL)
+        self.assertEqual(osm.classify({"aeroway": "aerodrome"}, area=True), "aerodrome")
+        self.assertIsNone(osm.classify({"aeroway": "aerodrome"}))
+        runway = SimpleNamespace(tags={"aeroway": "runway"})
+        self.assertEqual(renderer._way_width_m(runway, "runway"), 45.0)
+
+    def test_aeroways_are_fetched_and_bump_the_filter_version(self):
+        self.assertTrue(any('way["aeroway"' in query for query in osm.OVERPASS_FILTERS))
+        self.assertTrue(any('relation["aeroway"' in query for query in osm.OVERPASS_FILTERS))
+        self.assertIn('"aeroway"~', osm._build_query(0, 0, 1, 1))
+        self.assertEqual(osm.FILTERS_VERSION, 15)
+
+    def test_farmyards_and_fields_keep_distinct_land_uses(self):
+        self.assertEqual(osm.classify({"landuse": "farmyard"}), "farmyard")
+        self.assertEqual(osm.classify({"landuse": "farmland"}), "farmland")
+        self.assertEqual(osm.classify({"landuse": "plant_nursery"}), "orchard")
+        self.assertEqual(renderer.LANDSCAPE_FILL["farmyard"], renderer.C.DIRT)
+        self.assertEqual(areas.KIND_FOR_AREA["farmyard"], "barn")
 
     def test_default_widths_follow_hierarchy(self):
         expected = {"motorway": 24.0, "trunk": 16.0, "primary": 12.0,

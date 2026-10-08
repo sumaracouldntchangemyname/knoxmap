@@ -3,10 +3,16 @@ import unittest
 import numpy as np
 
 from generator import pz_colors as C
-from knoxbuild.yards import _pave_patio
+from knoxbuild.yards import _pave_patio, _yard_reservation
 
 
 class YardPlacement(unittest.TestCase):
+    def test_backyard_reservation_leaves_a_gap_between_fences(self):
+        reserved = _yard_reservation(lambda u, v: (u, v), 4, 5)
+
+        self.assertIn((4, 2), reserved)
+        self.assertNotIn((5, 2), reserved)
+
     def test_patio_paving_preserves_tiles_claimed_by_neighbor_paths(self):
         ground = np.full((3, 4, 3), C.MEDIUM_GRASS, dtype=np.uint8)
         vegetation = np.full((3, 4, 3), C.TREES, dtype=np.uint8)

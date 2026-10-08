@@ -98,6 +98,11 @@ def _outside_doors(tbx_path: str) -> list[tuple[int, int, int, int]]:
     return found
 
 
+def _yard_reservation(at, width: int, depth: int) -> set[tuple[int, int]]:
+    """Yard tiles plus a one-tile perimeter buffer, in world coordinates."""
+    return {at(u, v) for u in range(-1, width + 1) for v in range(-1, depth + 1)}
+
+
 def _pave_patio(ground, veg, crossable, claimed, cells):
     """Pave only unclaimed lawn so one home's patio cannot overwrite a neighbor's path."""
     h, w = crossable.shape
@@ -146,9 +151,14 @@ def paint_paths(out_dir: str, map_name: str, rows: list[dict], occupied,
                   C.DARKEST_ASPHALT, C.DARK_POTHOLE, C.LIGHT_POTHOLE))
     crossable = match(CROSSABLE) & ~occupied
     claimed = np.zeros((h, w), dtype=bool)     # painted for some house already
+    yard_reserved = np.zeros((h, w), dtype=bool)
 
     def free(x, y):
-        return 0 <= x < w and 0 <= y < h and crossable[y, x] and not claimed[y, x]
+        return (0 <= x < w and 0 <= y < h and crossable[y, x]
+                and not claimed[y, x] and not yard_reserved[y, x])
+
+    def yard_free(x, y):
+        return free(x, y)
 
     def paint(x, y, colour):
         ground[y, x] = colour
@@ -223,7 +233,8 @@ def paint_paths(out_dir: str, map_name: str, rows: list[dict], occupied,
             for ddx, ddy in order:
                 nx, ny = x + ddx, y + ddy
                 if 0 <= nx < w and 0 <= ny < h and (nx, ny) not in prev \
-                        and (crossable[ny, nx] or paved[ny, nx]):
+                    and (crossable[ny, nx] or paved[ny, nx]) \
+                    and not yard_reserved[ny, nx]:
                     prev[(nx, ny)] = (x, y)
                     queue.append((nx, ny, n + 1))
         if end is None:
@@ -305,7 +316,7 @@ def paint_paths(out_dir: str, map_name: str, rows: list[dict], occupied,
 
             depth = 0
             for v in range(YARD_DEPTH):
-                if not all(free(*at(u, v)) for u in range(width)):
+                if not all(yard_free(*at(u, v)) for u in range(width)):
                     break
                 depth = v + 1
             if depth >= YARD_MIN_DEPTH:
@@ -396,6 +407,9 @@ def paint_paths(out_dir: str, map_name: str, rows: list[dict], occupied,
                         row = "N" if y == ys_[0] else "S" if y == ys_[-1] else "M"
                         paint(x, y, C.DIRT)
                         veg[y, x] = frame[(col, row)]
+            for x, y in _yard_reservation(at, width, depth):
+                if 0 <= x < w and 0 <= y < h:
+                    yard_reserved[y, x] = True
         dressed += 1
 
     for row in rows:
@@ -413,7 +427,7 @@ def paint_paths(out_dir: str, map_name: str, rows: list[dict], occupied,
         if road[sy, sx]:
             continue
 
-        traversable = (crossable | paved | road) & ~occupied & ~claimed
+        traversable = (crossable | paved | road) & ~occupied & ~claimed & ~yard_reserved
         previous = {start: None}
         queue = deque([(sx, sy, 0)])
         end = None
@@ -450,6 +464,7 @@ def paint_paths(out_dir: str, map_name: str, rows: list[dict], occupied,
             for px, py in across:
                 if (0 <= px < w and 0 <= py < h and not road[py, px]
                         and not occupied[py, px] and not claimed[py, px]
+                        and not yard_reserved[py, px]
                         and (crossable[py, px] or paved[py, px])):
                     paint(px, py, C.DARK_ASPHALT)
                     painted.append((px, py))

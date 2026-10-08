@@ -29,6 +29,7 @@ KIND_FOR_AREA = {
     "worship_grounds": "church",
     "cemetery": "church",
     "sports": "civic",
+    "farmyard": "barn",
 }
 # Below this many tiles, a building on institutional grounds is an outbuilding
 # rather than the institution itself.

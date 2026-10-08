@@ -1,4 +1,5 @@
 import unittest
+import random
 from tempfile import TemporaryDirectory
 from types import SimpleNamespace
 from unittest import mock
@@ -12,6 +13,33 @@ from knoxbuild.profile import BuildingProfile
 
 
 class EntrancePointMapping(unittest.TestCase):
+    def test_house_uses_one_mapped_front_and_one_back_door(self):
+        width = height = 12
+        room = layout.Room(0, 0, width - 1, height - 1, kind="livingroom")
+        plan = layout.Plan(width, height, rooms=[room],
+                           grid=[[1] * width for _ in range(height)], kind="house")
+
+        layout._exterior_door(
+            plan, random.Random(1), street="S", entrances=[
+                (6.5, 12.0, {"entrance": "main"}),
+                (1.5, 0.0, {"entrance": "exit"}),
+            ])
+        layout._back_door(plan, street="S")
+
+        self.assertEqual(plan.doors, [(6, 12, "N"), (6, 0, "N")])
+
+    def test_large_public_building_adds_exits_beyond_one_mapped_entrance(self):
+        width, height = 60, 40
+        room = layout.Room(0, 0, width - 1, height - 1, kind="hall")
+        plan = layout.Plan(width, height, rooms=[room],
+                           grid=[[1] * width for _ in range(height)], kind="hospital")
+
+        layout._exterior_door(
+            plan, random.Random(1),
+            entrances=[(30.5, 40.0, {"entrance": "main"})])
+
+        self.assertGreaterEqual(len(plan.doors), 2)
+
     def test_entrance_nodes_are_not_consumed_as_points_of_use(self):
         grid = {(0, 0): [(10.5, 10.0, {"entrance": "main"}),
                          (10.5, 10.0, {"shop": "bakery"})]}

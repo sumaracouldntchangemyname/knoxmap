@@ -191,6 +191,10 @@ OVERPASS_FILTERS: Sequence[str] = (
     # Railways: the lines a town grew along, and on the paper map. Trams run
     # in the street and are left to the road under them.
     'way["railway"~"^(rail|light_rail|narrow_gauge|disused|preserved)$"]',
+    # Airport surfaces are distinct from roads: runways and taxiways are wide
+    # paved areas, while aerodromes and helipads mark their grounds.
+    'way["aeroway"~"^(aerodrome|runway|taxiway|apron|helipad)$"]',
+    'relation["aeroway"~"^(aerodrome|runway|taxiway|apron|helipad)$"]',
     'way["natural"="water"]',
     'way["waterway"]',
     'relation["natural"="water"]',
@@ -252,9 +256,11 @@ OVERPASS_FILTERS: Sequence[str] = (
     # yard, a schoolyard and a back garden all came out as the same wild grass,
     # which is most of why a generated town looked like nowhere in particular.
     'way["landuse"~"^(residential|commercial|retail|industrial|railway|garages|'
-    'military|cemetery|orchard|vineyard|allotments)$"]',
+    'military|cemetery|orchard|vineyard|allotments|farmyard|plant_nursery|'
+    'greenhouse_horticulture)$"]',
     'relation["landuse"~"^(residential|commercial|retail|industrial|railway|'
-    'military|cemetery|orchard|vineyard)$"]',
+    'military|cemetery|orchard|vineyard|farmyard|plant_nursery|'
+    'greenhouse_horticulture)$"]',
     'way["amenity"~"^(parking|school|university|college|kindergarten|hospital|'
     'clinic|bus_station|grave_yard|marketplace|place_of_worship)$"]',
     'relation["amenity"~"^(parking|school|university|college|hospital|'
@@ -296,7 +302,7 @@ OVERPASS_FILTERS: Sequence[str] = (
 
 # Bumped whenever the filters above change, so a cached download made with
 # the old list is fetched again instead of silently lacking the new features.
-FILTERS_VERSION = 13
+FILTERS_VERSION = 15
 
 
 @dataclass
@@ -995,6 +1001,12 @@ def classify(tags: dict, area: bool = False) -> str | None:
     amenity = tags.get("amenity")
     landuse = tags.get("landuse")
     leisure = tags.get("leisure")
+    aeroway = tags.get("aeroway")
+
+    if aeroway == "aerodrome":
+        return "aerodrome" if area else None
+    if aeroway in {"runway", "taxiway", "apron", "helipad"}:
+        return aeroway
 
     # Paved areas before the linear road classes: a pedestrian square and a
     # car park are tagged highway/amenity too, but they are polygons and want
@@ -1084,9 +1096,11 @@ def classify(tags: dict, area: bool = False) -> str | None:
     if landuse in {"grass", "meadow", "recreation_ground"} \
             or tags.get("natural") == "grassland":
         return "grass"
-    if landuse in {"farmland", "farmyard", "allotments"}:
+    if landuse == "farmyard":
+        return "farmyard"
+    if landuse in {"farmland", "allotments", "greenhouse_horticulture"}:
         return "farmland"
-    if landuse in {"orchard", "vineyard"}:
+    if landuse in {"orchard", "vineyard", "plant_nursery"}:
         return "orchard"
     if landuse == "cemetery" or amenity == "grave_yard":
         return "cemetery"
