@@ -1,8 +1,8 @@
-"""Discover and select exact-footprint BuildingEd lots from Building Pool V3.
+"""Discover and select safely fitting BuildingEd lots from Building Pool V3.
 
-Workshop lots are copied as-is: they are only candidates when their declared
-dimensions match the footprint KnoxMap is placing. This avoids silently
-cropping or stretching a finished building.
+Workshop lots are copied as-is: a lot must fit inside a solid rectangular
+portion of the footprint and cover a substantial share of it. This avoids
+silently cropping or stretching a finished building.
 """
 from __future__ import annotations
 
@@ -61,6 +61,62 @@ class TemplateCatalog:
         candidates.sort(key=lambda t: t.path.casefold())
         return random.Random(seed).choice(candidates)
 
+    def choose_for_mask(self, kind: str | None, mask, seed: int,
+                        minimum_coverage: float = 0.5
+                        ) -> tuple[BuildingTemplate, int, int] | None:
+        """Find an unchanged lot that fits inside a well-supported part of a footprint.
+
+        The returned x/y are offsets in `mask`. No template wall or furnishing
+        is clipped: the selected rectangle consists entirely of footprint tiles.
+        """
+        family = family_for_kind(kind)
+        if family is None or mask is None or not getattr(mask, "size", 0):
+            return None
+        height, width = mask.shape
+        if width < 3 or height < 3:
+            return None
+
+        # Largest all-true rectangle in linear time. Keeping deterministic
+        # ties makes an identical town seed place the same lots every time.
+        heights = [0] * width
+        best_area = 0
+        best_rect = None
+        for y in range(height):
+            row = mask[y]
+            for x in range(width):
+                heights[x] = heights[x] + 1 if row[x] else 0
+            stack: list[tuple[int, int]] = []
+            for x, tall in enumerate(heights + [0]):
+                start = x
+                while stack and stack[-1][1] > tall:
+                    start, prior = stack.pop()
+                    area = prior * (x - start)
+                    candidate = (y - prior + 1, start, prior, x - start)
+                    if area > best_area or (
+                            area == best_area and best_rect is not None
+                            and min(candidate[2:]) > min(best_rect[2:])):
+                        best_area, best_rect = area, candidate
+                if not stack or stack[-1][1] < tall:
+                    stack.append((start, tall))
+        if best_rect is None or best_area < 9:
+            return None
+        top, left, rect_height, rect_width = best_rect
+        footprint_tiles = int(mask.sum())
+        candidates = [template for template in self.templates
+                      if template.family == family
+                      and template.width <= rect_width
+                      and template.height <= rect_height
+                      and template.width * template.height
+                      >= footprint_tiles * minimum_coverage]
+        if not candidates:
+            return None
+        candidates.sort(key=lambda t: (
+            -(t.width * t.height), t.path.casefold()))
+        largest_area = candidates[0].width * candidates[0].height
+        near_best = [t for t in candidates
+                     if t.width * t.height >= largest_area * 0.94]
+        template = random.Random(seed).choice(near_best)
+        return template, left, top
 
 def family_for_kind(kind: str | None) -> str | None:
     kind = (kind or "house").lower()

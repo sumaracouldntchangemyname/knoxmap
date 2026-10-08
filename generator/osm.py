@@ -784,12 +784,11 @@ def cache_path(output_dir: str, map_name: str) -> str:
 
 def save_cache(path: str, bbox: tuple[float, float, float, float],
                feats: list[OSMFeature]) -> None:
-    """Keep the Overpass result next to the map it produced.
+    """Keep the map's source features next to the map that uses them.
 
-    Re-rendering is otherwise gated on a fresh download of the whole town,
-    which for a real one is a few hundred tiled queries with a second of
-    courtesy between each. Every change to how roads or ground are painted
-    then costs that download again, for data that has not moved.
+    OpenStreetMap results can be re-used without another download, and
+    procedural features remain available to later build steps that read this
+    cache (for example the in-game paper map).
     """
     payload = {
         "filters": FILTERS_VERSION,

@@ -4,9 +4,12 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
+import numpy as np
+
 import knoxpaths
 from generator.procedural_town import _building_size
-from knoxbuild.build import _make_one
+from knoxbuild.build import _make_one, _template_for_footprint
+from knoxbuild.footprint import Footprint
 from knoxbuild.settings import Settings
 from knoxbuild.templates import (BuildingTemplate, TemplateCatalog,
                                  _family_for_path, configured_pool_path,
@@ -45,7 +48,7 @@ class BuildingTemplateTests(unittest.TestCase):
                     patch.object(knoxpaths, "load_config", return_value={}):
                 self.assertEqual(Path(configured_pool_path()), pool.resolve())
 
-    def test_catalog_selects_only_matching_compatible_lots(self):
+    def test_catalog_prefers_exact_size_then_can_choose_usable_dimensions(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             wanted = root / "Buildings Catalogue Curated" / "Muldraugh" / \
@@ -68,6 +71,10 @@ class BuildingTemplateTests(unittest.TestCase):
             self.assertIsNone(catalog.choose("house", 14, 12, 5))
             self.assertEqual(catalog.choose("industrial", 12, 14, 5).family,
                              "industrial")
+            mask = np.ones((18, 18), dtype=bool)
+            fitted = catalog.choose_for_mask("house", mask, 5)
+            self.assertIsNotNone(fitted)
+            self.assertEqual((fitted[0].width, fitted[0].height), (12, 14))
 
     def test_copy_preserves_template_bytes(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -137,6 +144,82 @@ class BuildingTemplateTests(unittest.TestCase):
             result = _make_one(job)
             self.assertEqual(result, (2, 1, 0, None, []))
             self.assertEqual(destination.read_bytes(), source.read_bytes())
+
+    def test_osm_footprints_fit_unchanged_template_inside_safe_rectangle(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "Building Pool V3"
+            make_lot(root / "Residential" / "house.tbx", 10, 10)
+            make_lot(root / "Residential" / "smaller.tbx", 8, 8)
+            catalog = load_catalog(root)
+            rectangular = Footprint(0, 0, np.ones((10, 10), dtype=bool),
+                                    0, 10, 10)
+            irregular_mask = np.ones((10, 10), dtype=bool)
+            irregular_mask[0, 0] = False
+            irregular = Footprint(0, 0, irregular_mask, 0, 10, 10)
+
+            exact_fit = _template_for_footprint(
+                catalog, "house", rectangular, 17)
+            self.assertIsNotNone(exact_fit)
+            self.assertEqual((exact_fit[0].width, exact_fit[0].height), (10, 10))
+            self.assertIs(exact_fit[1], rectangular)
+
+            safe_fit = _template_for_footprint(
+                catalog, "house", irregular, 17)
+            self.assertIsNotNone(safe_fit)
+            template, fitted_fp = safe_fit
+            self.assertEqual((template.width, template.height), (8, 8))
+            self.assertTrue(irregular.mask[
+                fitted_fp.y0:fitted_fp.y0 + fitted_fp.height,
+                fitted_fp.x0:fitted_fp.x0 + fitted_fp.width].all())
+            self.assertEqual(fitted_fp.mask.sum(), 64)
+            narrow_mask = np.ones((10, 10), dtype=bool)
+            narrow_mask[:6, :] = False
+            self.assertIsNone(_template_for_footprint(
+                catalog, "house",
+                Footprint(0, 0, narrow_mask, 0, 10, 10), 17))
+
+    def test_smaller_fitted_workshop_lot_is_copied_without_resizing(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "Building Pool V3"
+            source = root / "Residential" / "lot.tbx"
+            make_lot(source, 8, 8, furniture=True)
+            catalog = load_catalog(root)
+            mask = np.ones((10, 12), dtype=bool)
+            footprint = Footprint(20, 30, mask, 0, 10, 12)
+            fit = _template_for_footprint(catalog, "house", footprint, 1)
+            self.assertIsNotNone(fit)
+            template, lot = fit
+            self.assertEqual((lot.width, lot.height), (8, 8))
+
+            destination = Path(directory) / "map" / "buildings" / "fitted.tbx"
+            destination.parent.mkdir(parents=True)
+            job = (lot.width, lot.height, 1, False, 1, "house", None,
+                   Settings(), None, "fitted", str(destination), None, False,
+                   [], False, [], None, [], False, {}, template)
+            result = _make_one(job)
+
+            self.assertIsNone(result[3])
+            self.assertEqual(destination.read_bytes(), source.read_bytes())
+
+    def test_unmatched_osm_footprint_still_uses_knoxmap_generator(self):
+        from types import SimpleNamespace
+
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "map" / "buildings" / "lot.tbx"
+            destination.parent.mkdir(parents=True)
+            job = (10, 10, 1, False, 1, "house", None, Settings(), None,
+                   "house", str(destination), None, False, [], False, [],
+                   None, [], False, {})
+            plan = SimpleNamespace(storeys=[], rooms=[], escalators=[])
+            with patch("knoxbuild.build.build_building", return_value=plan) as build, \
+                    patch("knoxbuild.build.render_tbx",
+                          return_value="<generated/>"):
+                result = _make_one(job)
+
+            build.assert_called_once()
+            self.assertEqual(destination.read_text(encoding="utf-8"),
+                             "<generated/>")
+            self.assertIsNone(result[3])
 
 
 if __name__ == "__main__":

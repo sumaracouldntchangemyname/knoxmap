@@ -859,7 +859,7 @@ def generate():
             forget_empty_folder()
             return jsonify({"error": str(exc)}), 400
     template_catalog = None
-    if procedural_town and settings.use_building_pool:
+    if settings.use_building_pool:
         from knoxbuild.templates import load_catalog
         try:
             template_catalog = load_catalog()
@@ -876,7 +876,7 @@ def generate():
     turned = bool(settings.align_streets) or bool(settings.rotate_degrees)
     if procedural_town:
         fetch_box = bbox
-        cache = None
+        cache = osm.cache_path(str(map_dir), f"{map_name}_procedural")
         from generator.procedural_town import generate as generate_town
         proj = renderer.Projector.build(
             south, west, north, east, meters_per_tile,
@@ -887,13 +887,19 @@ def generate():
             features = generate_town(proj, procedural_town,
                                      templates=template_catalog,
                                      should_stop=_stopper(map_name),
-                                     max_building_side=settings.max_size)
+                                     max_building_side=settings.max_size,
+                                     selection_shape=shape)
         except knoxstop.Stopped:
             forget_empty_folder()
             return _stopped(map_name, "generate")
         except ValueError as exc:
             forget_empty_folder()
             return jsonify({"error": str(exc)}), 400
+        try:
+            osm.save_cache(cache, fetch_box, features)
+        except (OSError, TypeError, ValueError) as exc:
+            forget_empty_folder()
+            return failed("Could not save the procedural town's street data.", 500, exc)
     elif turned:
         fetch_box = renderer.cover_bbox(south, west, north, east, meters_per_tile)
         cache = osm.cache_path(str(map_dir), f"{map_name}_turned")
@@ -961,7 +967,7 @@ def generate():
             rotation = -angle
     if not procedural_town:
         rotation += float(settings.rotate_degrees)
-    osm_cache_name = "procedural-town" if procedural_town else Path(cache).name
+    osm_cache_name = Path(cache).name
     osm_bbox = fetch_box
 
     osm_time = 0.0 if procedural_town else time.time() - t0
@@ -2054,9 +2060,9 @@ Notes
   at the edges so the transition isn't a hard rectangle.
 * The spawn map is generated procedurally: higher density on asphalt,
   zero on water, slight randomness throughout.
-* Generated lots are placed by the building step. When enabled, exact-size
-  Building Pool V3 lots are used where available; other footprints are built
-  by KnoxMap.
+* Generated lots are placed by the building step. When enabled, compatible
+  Building Pool V3 lots are used when they fit safely inside a substantial
+  rectangular part of a footprint; other buildings are built by KnoxMap.
 {pool_credit}
 """
     # UTF-8 whatever the PC's code page: the text has dashes that a Korean or

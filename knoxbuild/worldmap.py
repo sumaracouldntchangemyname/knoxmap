@@ -86,7 +86,7 @@ def write(out_dir: str, map_name: str, proj, info: dict,
     """Write worldmap.xml and streets.xml into `out_dir`. Returns counts.
 
     `buildings` holds each placed building's projected outline and its kind.
-    Roads, water and woodland come from the OSM download cached beside the
+    Roads, water and woodland come from the source-feature cache beside the
     map; a map folder without one still gets its buildings.
     """
     metres_per_tile = info["meters_per_tile"]

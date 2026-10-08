@@ -31,7 +31,7 @@ import knoxstop
 from .areas import AreaIndex
 from .bitmaps import read_gray, read_rgb, same_colour
 from .fences import build_fences
-from .footprint import place
+from .footprint import Footprint, place
 from .layout import build_building
 from .uses import USE_KEYS, is_hotel, uses_of
 from .context import Context, style_fits
@@ -1069,6 +1069,26 @@ def _make_one(job: tuple) -> tuple:
             list(plan.escalators))
 
 
+def _template_for_footprint(template_catalog, kind, footprint, seed):
+    """Find an unchanged lot fully contained in a substantial footprint part."""
+    if template_catalog is None:
+        return None
+    fit = template_catalog.choose_for_mask(kind, footprint.mask, seed)
+    if fit is None:
+        return None
+    template, left, top = fit
+    if (left, top, template.width, template.height) == (
+            0, 0, footprint.width, footprint.height):
+        return template, footprint
+    mask = np.ones((template.height, template.width), dtype=bool)
+    lot = Footprint(
+        footprint.x0 + left, footprint.y0 + top, mask,
+        footprint.angle, footprint.short_side, footprint.long_side,
+        footprint.point_origin, footprint.point_rotation,
+        footprint.point_offset)
+    return template, lot
+
+
 # Below this many buildings, starting worker processes costs more than it saves.
 PARALLEL_FROM = 60
 
@@ -1535,10 +1555,11 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
         # A row of shops or a terrace of houses is one polygon here; built as
         # one building it is the "uber building" players reported. Each unit
         # becomes its own building, standing wall to wall with the next.
-        whole_template = (template_catalog.choose(
-            special or "house", fp.width, fp.height, seed + i * 31)
+        template_fit = (_template_for_footprint(
+            template_catalog, special or "house", fp, seed + i * 31)
             if template_catalog and not oversize else None)
-        units = ([fp] if whole_template else
+        whole_template, template_fp = template_fit or (None, None)
+        units = ([template_fp] if whole_template else
                  row_units(fp, special, btag, len(uses), metres_per_tile,
                            max_side=max_size if oversize else None))
         if oversize:
@@ -1566,6 +1587,15 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
                      name or f"{map_name} building {i}")
             if ("gunstore", "storage") in unit_uses:
                 gunshops.add(fname)
+            if n == 0 and len(units) == 1 and whole_template:
+                unit_template = whole_template
+            elif n == 0 and len(units) == 1 and not oversize:
+                unit_template = None
+            else:
+                unit_fit = _template_for_footprint(
+                    template_catalog, special or "house", unit,
+                    seed + i * 31 + n)
+                unit_template = unit_fit[0] if unit_fit else None
             jobs.append((uw, uh, levels, commercial, seed + i * 31 + n, special, umask,
                          settings, style, label, os.path.join(bdir, fname),
                          street_side(ux0, uy0, uw, uh),
@@ -1577,11 +1607,11 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
                          btag in ("garage", "garages")
                          or special in ("garage", "fire"),
                          None,
-                         (whole_template if n == 0 and len(units) == 1
-                          else template_catalog.choose(
-                              special or "house", uw, uh, seed + i * 31 + n))
-                         if template_catalog else None))
-            outline = px if len(units) == 1 else [
+                         unit_template))
+            outline = (px if unit is fp else [
+                (ux0, uy0), (ux0 + uw, uy0),
+                (ux0 + uw, uy0 + uh), (ux0, uy0 + uh)
+            ]) if len(units) == 1 else [
                 (ux0, uy0), (ux0 + uw, uy0), (ux0 + uw, uy0 + uh), (ux0, uy0 + uh)]
             decided.append((fname, label, ux0, uy0, uw, uh, unit, outline, special,
                             measured, commercial, style, umask,
