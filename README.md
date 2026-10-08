@@ -84,6 +84,14 @@ actually lived, and installs the result as a mod.
   lived and worked in each building, and every part of it is adjustable.
 - **Any shape you like**: a rectangle, a polygon, a circle, a freehand outline,
   or a place's real boundary.
+- **Procedural towns.** Draw an area and generate an offline town with
+  selectable small-town, compact-city, suburban, rural-village, industrial or
+  riverside character; adjust blocks, building mix, organic or grid streets,
+  road hierarchy, parks, ponds and riverside greenways with a building setback.
+  Optionally use exact-size local lots from
+  [Building Pool V3](https://steamcommunity.com/sharedfiles/filedetails/?id=2790726238),
+  a community collection on the Steam Workshop; unmatched buildings still use
+  KnoxMap's generator.
 
 <p align="center">
   <img src="docs/images/nyc_midtown.png" alt="Midtown Manhattan: the terrain bitmap and the in-game paper map" width="100%"/>
@@ -383,6 +391,12 @@ lays out buildings the way Elevators recognises lifts, and adds the map's places
 to Spawn Selector's lists when that mod is running; no code or files from either
 mod are copied.
 
+**Building Pool V3.** This is a separate community collection on the
+[Steam Workshop](https://steamcommunity.com/sharedfiles/filedetails/?id=2790726238),
+item 2790726238. Credit belongs to its Workshop author and the creators of its
+contributed lots. KnoxMap reads a local subscribed copy and, when enabled, copies
+matching `.tbx` lots unchanged; the Workshop files are not included with KnoxMap.
+
 **No warranty.** KnoxMap is provided as is, without warranty of any kind. Maps
 are generated automatically and have not been checked in game place by place.
 They can contain mistakes, and a map mod added to or removed from a save can
@@ -397,6 +411,9 @@ for any damage or loss from using KnoxMap or its maps.
 - **[PZ Mapping Tools](https://github.com/Unjammer/PZ_Mapping_Tools)** by Alree /
   Unjammer, built on Tim Baker's TileZed and WorldEd (GPL).
 - **Map data** © OpenStreetMap contributors (ODbL).
+- **Building Pool V3**, a community collection on the Steam Workshop, item
+  [2790726238](https://steamcommunity.com/sharedfiles/filedetails/?id=2790726238);
+  its author and contributing lot creators retain credit for their work.
 - **Elevators** and **Spawn Selector** mods for Project Zomboid, by their
   authors, on the Steam Workshop.
 - Thuztor's *Mapping Guide v0.2* for the terrain colour conventions.

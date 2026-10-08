@@ -1045,8 +1045,13 @@ def _make_one(job: tuple) -> tuple:
     furniture, error): a building that cannot be laid out is left out with the
     reason, instead of stopping the other two thousand."""
     (w, h, levels, commercial, seed, kind, mask, settings, style, label, path, street, retail,
-        uses, hotel, entrances, profile, mapped, garage_door, party) = job
+        uses, hotel, entrances, profile, mapped, garage_door, party) = job[:20]
+    template = job[20] if len(job) > 20 else None
     try:
+        if template is not None:
+            from .templates import copy_template
+            copy_template(template, path)
+            return (template.levels, template.rooms, template.furniture, None, [])
         plan = build_building(w, h, levels=levels, commercial=commercial, seed=seed,
                               kind=kind, mask=mask, settings=settings, street=street,
                               retail=retail, uses=uses, hotel=hotel, party=party,
@@ -1190,6 +1195,12 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
     seed = settings.seed
     min_size = settings.min_size
     max_size = settings.max_size
+    template_catalog = None
+    if settings.use_building_pool:
+        from .templates import load_catalog
+        template_catalog = load_catalog()
+        if template_catalog.invalid:
+            print(f"  (skipped {template_catalog.invalid} invalid Building Pool lots)")
     names = [f for f in os.listdir(out_dir) if f.endswith("_info.json")]
     if not names:
         print(f"no <name>_info.json in {out_dir}", file=sys.stderr)
@@ -1524,8 +1535,12 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
         # A row of shops or a terrace of houses is one polygon here; built as
         # one building it is the "uber building" players reported. Each unit
         # becomes its own building, standing wall to wall with the next.
-        units = row_units(fp, special, btag, len(uses), metres_per_tile,
-                          max_side=max_size if oversize else None)
+        whole_template = (template_catalog.choose(
+            special or "house", fp.width, fp.height, seed + i * 31)
+            if template_catalog and not oversize else None)
+        units = ([fp] if whole_template else
+                 row_units(fp, special, btag, len(uses), metres_per_tile,
+                           max_side=max_size if oversize else None))
         if oversize:
             split_large += 1
         unit_mapped = _rooms_by_unit(mapped, fp, units, proj)
@@ -1560,7 +1575,12 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
                          unit_uses, hotel, entrances_by_unit[n], profile,
                          unit_mapped[n],
                          btag in ("garage", "garages")
-                         or special in ("garage", "fire")))
+                         or special in ("garage", "fire"),
+                         None,
+                         (whole_template if n == 0 and len(units) == 1
+                          else template_catalog.choose(
+                              special or "house", uw, uh, seed + i * 31 + n))
+                         if template_catalog else None))
             outline = px if len(units) == 1 else [
                 (ux0, uy0), (ux0 + uw, uy0), (ux0 + uw, uy0 + uh), (ux0, uy0 + uh)]
             decided.append((fname, label, ux0, uy0, uw, uh, unit, outline, special,
@@ -1577,8 +1597,11 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
         view = owner[dy0:dy0 + dh, dx0:dx0 + dw]
         view[dfp.mask[:view.shape[0], :view.shape[1]]] = j
     for j, d in enumerate(decided):
-        jobs[j] = jobs[j] + (_party_walls(owner, j, d[2], d[3], d[6].mask,
-                                          [job[2] for job in jobs]),)
+        jobs[j] = jobs[j][:19] + (
+            _party_walls(owner, j, d[2], d[3], d[6].mask,
+                         [job[2] for job in jobs]),
+            jobs[j][20],
+        )
 
     # Every decision above is made in order, from one random stream, so the
     # town comes out the same each time. What is left - laying out rooms and
@@ -1610,12 +1633,17 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
     for j, result in zip(todo, _make_all([jobs[j] for j in todo], laid_out)):
         results[j] = result
 
-    for (fname, label, x0, y0, w, h, fp, px, special, measured, commercial,
-         style, mask, real_name), (storeys, rooms, furniture, error,
-                                   escalators) in zip(decided, results):
+    templates_used = 0
+    for building_index, ((fname, label, x0, y0, w, h, fp, px, special,
+                          measured, commercial, style, mask, real_name),
+                         (storeys, rooms, furniture, error, escalators)) in \
+            enumerate(zip(decided, results)):
         if error:
             failed_buildings.append(error)
             continue
+        template = jobs[building_index][-1]
+        if template is not None:
+            templates_used += 1
         # A mall's escalators stand in its atrium and carry two tiles on some
         # squares, so they are packed as their own lot rather than written
         # into the building (knoxbuild/catalog.escalator_tiles).
@@ -1642,7 +1670,10 @@ def build(out_dir: str, seed: int | None = None, min_size: int | None = None,
             "style": style["name"],
             "shaped": int(mask is not None),
             "angle": round(fp.angle, 1),
+            "template": (os.path.relpath(template.path, template_catalog.root)
+                         if template is not None else ""),
         })
+    print(f"used {templates_used} Building Pool V3 templates")
     rows.sort(key=lambda r: r["file"])
     knoxstop.check(should_stop, "the buildings")
 

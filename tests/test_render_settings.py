@@ -15,11 +15,11 @@ import app
 from knoxbuild.settings import Settings
 
 
-# Read by generate() and deliberately not in the list: the renderer draws a
-# first zombie spawn map from the ground colours, and then the building step
-# throws that away and draws it again from the people in the buildings
-# (knoxbuild/build.py). Changing it only needs the buildings doing again.
-REDRAWN_BY_THE_BUILD = {"spawn_density"}
+# Read by generate() and deliberately not in the list: the building step
+# rebuilds the spawn map, while the pool setting is reapplied to existing
+# footprints during that step (and informs lot sizes only for new procedural
+# layouts).
+REDRAWN_BY_THE_BUILD = {"spawn_density", "use_building_pool"}
 
 
 def settings_read_by(source) -> set:

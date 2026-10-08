@@ -26,6 +26,10 @@ worlded/build/
 Tiles/
 *.pack
 
+# Optional locally supplied Steam Workshop assets; discover them at runtime,
+# but do not bundle them in the KnoxMap repository or releases.
+/assets/workshop/Building Pool V3/
+
 # Logs and leftovers
 *.log
 *.orig

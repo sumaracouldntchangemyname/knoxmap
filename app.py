@@ -717,7 +717,7 @@ BUILD_BASE_BYTES = 300e6
 # steps a change really needs. tests/test_render_settings.py checks it against
 # what generate() actually reads, so the two cannot drift apart.
 RENDER_SETTINGS = ["align_streets", "rotate_degrees", "straight_roads",
-                   "tree_density", "fill_gaps"]
+                   "tree_density", "fill_gaps", "max_size"]
 
 
 def _too_big_for_memory(tiles_w: float, tiles_h: float,
@@ -850,8 +850,23 @@ def generate():
     # use the same ones without the page having to send them again - and so a
     # map from last week can be reproduced exactly.
     settings = Settings.from_dict(data.get("settings"))
+    procedural_town = None
+    if data.get("proceduralTown") is not None:
+        from generator.procedural_town import TownParameters
+        try:
+            procedural_town = TownParameters.from_dict(data.get("proceduralTown"))
+        except ValueError as exc:
+            forget_empty_folder()
+            return jsonify({"error": str(exc)}), 400
+    template_catalog = None
+    if procedural_town and settings.use_building_pool:
+        from knoxbuild.templates import load_catalog
+        try:
+            template_catalog = load_catalog()
+        except (FileNotFoundError, ValueError) as exc:
+            forget_empty_folder()
+            return jsonify({"error": str(exc)}), 400
     _save_settings(map_dir, settings)
-
     # What to download. A map turned to its street grid (see
     # renderer.dominant_road_angle) reaches past the drawn box at its corners,
     # and the angle is only known once the streets are in. This used to fetch
@@ -859,7 +874,27 @@ def generate():
     # the same town twice over, about 2.4 times the data. Now one download
     # covers the map at any angle: the circle round it, as a box.
     turned = bool(settings.align_streets) or bool(settings.rotate_degrees)
-    if turned:
+    if procedural_town:
+        fetch_box = bbox
+        cache = None
+        from generator.procedural_town import generate as generate_town
+        proj = renderer.Projector.build(
+            south, west, north, east, meters_per_tile,
+            rotation=float(settings.rotate_degrees))
+        _set_progress(map_name, stage="procedural", done=0, total=1,
+                      note="laying out streets and blocks")
+        try:
+            features = generate_town(proj, procedural_town,
+                                     templates=template_catalog,
+                                     should_stop=_stopper(map_name),
+                                     max_building_side=settings.max_size)
+        except knoxstop.Stopped:
+            forget_empty_folder()
+            return _stopped(map_name, "generate")
+        except ValueError as exc:
+            forget_empty_folder()
+            return jsonify({"error": str(exc)}), 400
+    elif turned:
         fetch_box = renderer.cover_bbox(south, west, north, east, meters_per_tile)
         cache = osm.cache_path(str(map_dir), f"{map_name}_turned")
     else:
@@ -870,8 +905,9 @@ def generate():
     # re-rendered after the ground or road rules change - and a town's worth of
     # Overpass tiles takes minutes to download every time. The reply is kept on
     # disk and reused whenever the bbox matches to the metre.
-    features = osm.load_cache(cache, fetch_box)
-    if features is None:
+    if not procedural_town:
+        features = osm.load_cache(cache, fetch_box)
+    if not procedural_town and features is None:
         _set_progress(map_name, stage="osm", done=0, total=1)
         def _progress(i, total, note=""):
             _set_progress(map_name, stage="osm", done=i - 1, total=total,
@@ -902,7 +938,7 @@ def generate():
     # so the street angle, the ground, the gardens and the .tbx all see them
     # exactly as they see a mapped one (generator/overture.py).
     gaps = {"added": 0}
-    if settings.fill_gaps:
+    if settings.fill_gaps and not procedural_town:
         from generator import overture
         _set_progress(map_name, stage="overture", done=0, total=1)
         try:
@@ -918,17 +954,17 @@ def generate():
             log.info("overture %s: %d buildings OSM had not got, from %d fetched",
                      map_name, gaps["added"], gaps.get("fetched", 0))
 
-    rotation = 0.0
-    if settings.align_streets:
+    rotation = float(settings.rotate_degrees) if procedural_town else 0.0
+    if settings.align_streets and not procedural_town:
         angle, strength = renderer.dominant_road_angle(features, *bbox)
         if strength >= renderer.ALIGN_MIN_STRENGTH and abs(angle) >= 0.5:
             rotation = -angle
-    # And whatever turn the mapper asked for on top of that.
-    rotation += float(settings.rotate_degrees)
-    osm_cache_name = Path(cache).name
+    if not procedural_town:
+        rotation += float(settings.rotate_degrees)
+    osm_cache_name = "procedural-town" if procedural_town else Path(cache).name
     osm_bbox = fetch_box
 
-    osm_time = time.time() - t0
+    osm_time = 0.0 if procedural_town else time.time() - t0
     _set_progress(map_name, stage="render", features=len(features))
 
     try:
@@ -943,7 +979,11 @@ def generate():
             osm_cache=osm_cache_name,
             osm_bbox=osm_bbox,
             shape=shape,
-            straight_roads=bool(settings.straight_roads),
+            # Procedural streets already follow the selected street pattern:
+            # octilinearizing them would erase organic bends and move roads
+            # into their own lots.
+            straight_roads=(bool(settings.straight_roads)
+                            if not procedural_town else False),
             should_stop=_stopper(map_name),
         )
     except knoxstop.Stopped:
@@ -962,7 +1002,24 @@ def generate():
             f"the memory of 1 m. Everything downloaded is kept, so a second run "
             f"starts from the OpenStreetMap data already on disk.", 507)
 
-    _write_readme(map_dir, map_name, result)
+    _write_readme(map_dir, map_name, result, bool(procedural_town),
+                  bool(settings.use_building_pool))
+    if procedural_town or settings.use_building_pool:
+        try:
+            with open(result.meta_path, encoding="utf-8") as f:
+                map_info = json.load(f)
+            if procedural_town:
+                map_info["procedural_town"] = procedural_town.to_dict()
+            if settings.use_building_pool:
+                map_info["building_pool"] = {
+                    "name": "Building Pool V3",
+                    "workshop_id": "2790726238",
+                    "url": "https://steamcommunity.com/sharedfiles/filedetails/?id=2790726238",
+                }
+            with open(result.meta_path, "w", encoding="utf-8") as f:
+                json.dump(map_info, f, indent=2)
+        except (OSError, ValueError) as exc:
+            return failed(f"Could not save map generation metadata: {exc}", 500, exc)
     _set_progress(map_name, stage="done")
     mapstate.stamp(str(map_dir), "generate")
     from_addresses = 0
@@ -993,6 +1050,7 @@ def generate():
         # As they were taken, clamped and saved - not as the page sent them -
         # so it can tell afterwards which knobs have really been moved since.
         "settings": settings.to_dict(),
+        "proceduralTown": procedural_town.to_dict() if procedural_town else None,
         "fromOverture": gaps.get("added", 0),
         "overtureError": gaps.get("error") or gaps.get("why") or "",
         "files": {
@@ -1032,6 +1090,8 @@ def _map_summary(map_dir: Path) -> dict:
         "bbox": info.get("bbox"),
         "metersPerTile": info.get("meters_per_tile", 1.0),
         "shape": info.get("shape"),
+        "proceduralTown": info.get("procedural_town"),
+        "usedBuildingPool": bool(_load_settings(map_dir).use_building_pool),
         # The settings this map was made with. Upgrading it sent none at all,
         # so a map drawn with Knox County roads or a tree density of its own
         # came back with the defaults and looked like a different town.
@@ -1211,10 +1271,16 @@ def api_buildings():
                  out.getvalue()[-4000:])
         return failed(f"Building generation failed: {exc}", 500, exc)
     tbx = sorted((map_dir / "buildings").glob("*.tbx"))
+    import csv
+    with open(map_dir / f"{map_dir.name}_placements.csv", newline="",
+              encoding="utf-8") as f:
+        templates_used = sum(bool(row.get("template"))
+                             for row in csv.DictReader(f))
     mapstate.stamp(str(map_dir), "build")
     log.info("buildings %s: %d files in %.1fs\n%s", map_dir.name, len(tbx),
              time.time() - t0, out.getvalue()[-3000:])
     return jsonify({"count": len(tbx),
+                    "buildingPoolUsed": templates_used,
                     "pzw": f"{map_dir.name}.pzw",
                     "settings": settings.to_dict(),
                     "population": _population(map_dir)})
@@ -1582,6 +1648,34 @@ def api_steam_libraries():
                     "game": str(knoxpaths.pz_install_dir() or "")})
 
 
+@app.route("/api/building-pool", methods=["GET", "POST"])
+def api_building_pool():
+    """Find or configure a local Building Pool V3 folder; no files are uploaded."""
+    import knoxpaths
+    from knoxbuild import templates
+
+    if request.method == "POST":
+        path = str(_json_body().get("path", "")).strip().strip('"')
+        if path and not templates._pool_root(path):
+            return jsonify({"error": "That folder does not contain BuildingEd .tbx lots."}), 400
+        knoxpaths.update_config({"building_pool_path": path})
+    path = templates.configured_pool_path()
+    if not path:
+        return jsonify({"path": "", "available": False, "count": 0,
+                        "message": "Building Pool V3 folder not found."})
+    try:
+        catalog = templates.load_catalog(path)
+    except (FileNotFoundError, ValueError) as exc:
+        return jsonify({"path": path, "available": False, "count": 0,
+                        "message": str(exc)})
+    counts = {}
+    for template in catalog.templates:
+        counts[template.family] = counts.get(template.family, 0) + 1
+    return jsonify({"path": path, "available": True,
+                    "count": len(catalog.templates), "families": counts,
+                    "invalid": catalog.invalid})
+
+
 def _has_road_rules(tools) -> bool:
     if not tools:
         return False
@@ -1907,10 +2001,24 @@ def _cos_lat(lat_deg: float) -> float:
     return math.cos(math.radians(lat_deg))
 
 
-def _write_readme(map_dir: Path, map_name: str, result: renderer.RenderResult) -> None:
+def _write_readme(map_dir: Path, map_name: str, result: renderer.RenderResult,
+                  procedural_town: bool = False,
+                  building_pool: bool = False) -> None:
+    source = ("procedural" if procedural_town else "OpenStreetMap")
+    footprint_description = ("generated lot footprints" if procedural_town
+                             else "building footprints from OSM")
+    pool_credit = (
+        "\nBuilding templates\n------------------\n"
+        "Building Pool V3 is a community collection on the Steam Workshop "
+        "(item 2790726238):\n"
+        "https://steamcommunity.com/sharedfiles/filedetails/?id=2790726238\n"
+        "Credit belongs to the Workshop mod's author and contributing creators. "
+        "KnoxMap reads the local mod files and copies selected lots unchanged.\n"
+        if building_pool else "")
     text = f"""Project Zomboid map: {map_name}
 Generated by KnoxMap.
 
+Terrain source:     {source}
 Bitmap dimensions: {result.width}x{result.height} tiles
 Cell grid:         {result.cells_x} x {result.cells_y} (cells are always 300 tiles)
 
@@ -1920,7 +2028,7 @@ Files
 {map_name}_veg.bmp              Vegetation (trees, bushes, long grass)
 {map_name}_ZombieSpawnMap.bmp   Zombie population (grayscale, 1/10 scale)
 {map_name}_preview.png          Human-viewable preview of what you'll get
-{map_name}_buildings.geojson    Building footprints from OSM (for reference)
+{map_name}_buildings.geojson    {footprint_description}
 {map_name}_info.json            Meta: bbox, scale, cell count
 {map_name}.zip                  Everything in this folder, from the web UI
 
@@ -1933,9 +2041,7 @@ How to import (per Thuztor's Mapping Guide v0.2, chapter 2)
    next to the landscape bitmap with the same base filename.)
 4. File -> BMP to TMX -> All cells. Set an export folder for the .tmx output.
 5. Open the resulting project in WorldEd / TileZed to place buildings
-   (.tbx files) on top of the landscape. This tool does NOT place PZ
-   buildings — OSM building footprints are exported as GeoJSON for
-   reference only.
+   (.tbx files) on top of the landscape.
 6. File -> Generate Lots. This produces .lotheader + .lotpack files.
 7. Copy those into your game's media/maps folder (see chapter 9 of the
    guide for offset / world-origin details).
@@ -1948,10 +2054,10 @@ Notes
   at the edges so the transition isn't a hard rectangle.
 * The spawn map is generated procedurally: higher density on asphalt,
   zero on water, slight randomness throughout.
-* OSM building footprints CANNOT be converted directly to PZ buildings —
-  PZ buildings are a separate thing you assemble in BuildingEd (.tbx).
-  The GeoJSON file lets you see where buildings would sit in the real
-  world and drop matching .tbx lots in the right tiles.
+* Generated lots are placed by the building step. When enabled, exact-size
+  Building Pool V3 lots are used where available; other footprints are built
+  by KnoxMap.
+{pool_credit}
 """
     # UTF-8 whatever the PC's code page: the text has dashes that a Korean or
     # Japanese Windows cannot write in its own, and the whole generate request
